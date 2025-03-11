@@ -76,6 +76,7 @@ def get_vm_network_interfaces(vm, resource_group):
             vm_interface = VMInterface(
                 name=nic_name,
                 virtual_machine=vm.name,
+                mac_address=nic.mac_address,
                 enabled=True,
                 description=f"Interface for {vm.name}"
             )
@@ -112,38 +113,40 @@ def get_vm_network_interfaces(vm, resource_group):
 def get_vm_disks(vm, resource_group):
     """Get disk information for a VM"""
     disks = []
-    total_disk_size = 0
+    total_disk_size_mb = 0
 
     # OS disk
-    os_disk_size = vm.storage_profile.os_disk.disk_size_gb or 0
-    # Ensure disk size is an integer
-    os_disk_size = int(os_disk_size)
-    total_disk_size += os_disk_size
+    os_disk_size_gb = vm.storage_profile.os_disk.disk_size_gb or 0
+    # Convert GB to MB for NetBox (size should be in MB)
+    os_disk_size_mb = int(os_disk_size_gb) * 1024
+    total_disk_size_mb += os_disk_size_mb
 
     os_disk = VirtualDisk(
         name=vm.storage_profile.os_disk.name,
         virtual_machine=vm.name,
-        size=os_disk_size,
+        size=os_disk_size_mb,  # Size in MB
         description=f"OS Disk for {vm.name}"
     )
     disks.append(Entity(virtual_disk=os_disk))
 
     # Data disks
     for data_disk in vm.storage_profile.data_disks:
-        disk_size = data_disk.disk_size_gb or 0
-        # Ensure disk size is an integer
-        disk_size = int(disk_size)
-        total_disk_size += disk_size
+        disk_size_gb = data_disk.disk_size_gb or 0
+        # Convert GB to MB for NetBox (size should be in MB)
+        disk_size_mb = int(disk_size_gb) * 1024
+        total_disk_size_mb += disk_size_mb
 
         disk = VirtualDisk(
             name=data_disk.name,
             virtual_machine=vm.name,
-            size=disk_size,
+            size=disk_size_mb,  # Size in MB
             description=f"Data Disk for {vm.name}"
         )
         disks.append(Entity(virtual_disk=disk))
 
-    return disks, total_disk_size
+    # Return total disk size in GB for VM entity
+    total_disk_size_gb = total_disk_size_mb // 1024
+    return disks, total_disk_size_gb
 
 def collect_azure_regions():
     """Collect all Azure regions where VMs are located"""
@@ -177,14 +180,6 @@ def create_sites_and_clusters():
         description="Microsoft Azure Cloud Platform"
     )
     entities.append(Entity(cluster_type=cluster_type))
-
-    # Create a global site for Azure resources
-    azure_site = Site(
-        name="Azure Cloud",
-        status="active",
-        description="Microsoft Azure Cloud Platform"
-    )
-    entities.append(Entity(site=azure_site))
 
     # Get all regions where VMs are located
     regions = collect_azure_regions()
