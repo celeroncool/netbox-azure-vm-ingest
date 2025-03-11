@@ -6,7 +6,7 @@ from azure.mgmt.resource import ResourceManagementClient
 from netboxlabs.diode.sdk import DiodeClient
 from netboxlabs.diode.sdk.ingester import (
     Entity,
-    VirtualMachine,  # Changed back to VirtualMachine
+    VirtualMachine,
     VirtualDisk,
     VMInterface,
     IPAddress,
@@ -285,6 +285,7 @@ def collect_azure_vms(regions):
             vm_entity = VirtualMachine(
                 name=vm_name,
                 cluster=f"Azure-{region}",  # Assign to region cluster
+                site=f"Azure-{region}",
                 vcpus=vcpus,
                 memory=memory_mb,  # Memory in MB
                 disk=total_disk_size_mb,  # Disk in MB
