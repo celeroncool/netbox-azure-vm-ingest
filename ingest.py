@@ -6,7 +6,7 @@ from azure.mgmt.resource import ResourceManagementClient
 from netboxlabs.diode.sdk import DiodeClient
 from netboxlabs.diode.sdk.ingester import (
     Entity,
-    VirtualMachineFlat,  # Changed to VirtualMachineFlat
+    VirtualMachine,  # Changed back to VirtualMachine
     VirtualDisk,
     VMInterface,
     IPAddress,
@@ -81,7 +81,7 @@ def get_vm_network_interfaces(vm, resource_group):
             )
 
             # Create entity with the correct field name for VM interface
-            interfaces.append(Entity(vm_interface=vm_interface))
+            interfaces.append(Entity(vminterface=vm_interface))
 
             # Get IP address if available
             if ip_config.private_ip_address:
@@ -280,7 +280,7 @@ def collect_azure_vms(regions):
                     tag_value_str = str(tag_value)[:50]  # Limit tag value length
                     tags.append(f"{tag_key}:{tag_value_str}")
 
-            # Create VM entity with VirtualMachineFlat and assign to region cluster
+            # Create VM entity with VirtualMachine and assign to region cluster
             # Skip platform field as requested
             vm_entity = VirtualMachine(
                 name=vm_name,
@@ -294,13 +294,20 @@ def collect_azure_vms(regions):
             )
             entities.append(Entity(virtual_machine=vm_entity))
 
-            # Add disks to entities
-            entities.extend(disks)
+            # Add disks to entities - use individual append calls
+            for disk_entity in disks:
+                entities.append(disk_entity)
 
             # Get network interfaces and IP addresses
             interfaces, ip_addresses = get_vm_network_interfaces(vm_details, rg_name)
-            entities.extend(interfaces)
-            entities.extend(ip_addresses)
+
+            # Add interfaces to entities - use individual append calls
+            for interface_entity in interfaces:
+                entities.append(interface_entity)
+
+            # Add IP addresses to entities - use individual append calls
+            for ip_entity in ip_addresses:
+                entities.append(ip_entity)
 
     print(f"Processed {vm_count} VMs across {len(regions)} regions")
     return entities
