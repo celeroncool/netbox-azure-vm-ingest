@@ -66,7 +66,7 @@ def get_vm_network_interfaces(vm, resource_group):
         nic = network_client.network_interfaces.get(resource_group, nic_name)
 
         for ip_config in nic.ip_configurations:
-            # Create VM interface
+            # Create VM interface using the VMInterface class
             vm_interface = VMInterface(
                 name=nic_name,
                 virtual_machine=vm.name,
@@ -74,8 +74,10 @@ def get_vm_network_interfaces(vm, resource_group):
                 enabled=True,
                 description=f"Interface for {vm.name}"
             )
-            # Create entity with the correct field name
-            interfaces.append(Entity(virtual_machine_interface=vm_interface))
+
+            # Create entity with the correct field name for VM interface
+            # Based on the error, let's try the field name that matches the class name
+            interfaces.append(Entity(vminterface=vm_interface))
 
             # Get IP address if available
             if ip_config.private_ip_address:
