@@ -6,7 +6,7 @@ from azure.mgmt.resource import ResourceManagementClient
 from netboxlabs.diode.sdk import DiodeClient
 from netboxlabs.diode.sdk.ingester import (
     Entity,
-    VirtualMachine,
+    VirtualMachineFlat,  # Changed to VirtualMachineFlat
     VirtualDisk,
     VMInterface,
     IPAddress,
@@ -52,9 +52,8 @@ def get_vm_size_details(vm_size, location):
         size_info = compute_client.virtual_machine_sizes.list(location=location)
         for size in size_info:
             if size.name == vm_size:
-                # Convert memory to integer GB (round up)
-                memory_gb = int(size.memory_in_mb / 1024)
-                return size.number_of_cores, memory_gb
+                # Return memory in MB directly
+                return size.number_of_cores, size.memory_in_mb
     except Exception as e:
         print(f"Error getting VM size details: {str(e)}")
     return None, None
@@ -82,7 +81,7 @@ def get_vm_network_interfaces(vm, resource_group):
             )
 
             # Create entity with the correct field name for VM interface
-            interfaces.append(Entity(vminterface=vm_interface))
+            interfaces.append(Entity(vm_interface=vm_interface))
 
             # Get IP address if available
             if ip_config.private_ip_address:
@@ -144,9 +143,8 @@ def get_vm_disks(vm, resource_group):
         )
         disks.append(Entity(virtual_disk=disk))
 
-    # Return total disk size in GB for VM entity
-    total_disk_size_gb = total_disk_size_mb // 1024
-    return disks, total_disk_size_gb
+    # Return total disk size in MB for VM entity
+    return disks, total_disk_size_mb
 
 def collect_azure_regions():
     """Collect all Azure regions where VMs are located"""
@@ -240,14 +238,14 @@ def collect_azure_vms(regions):
                         os_version = status.display_status
 
             # Get VM size details (vCPU and memory)
-            vcpus, memory = get_vm_size_details(vm_details.hardware_profile.vm_size, region)
+            vcpus, memory_mb = get_vm_size_details(vm_details.hardware_profile.vm_size, region)
             if vcpus is None:
                 vcpus = 0
-            if memory is None:
-                memory = 0
+            if memory_mb is None:
+                memory_mb = 0
 
             # Get disk information
-            disks, total_disk_size = get_vm_disks(vm_details, rg_name)
+            disks, total_disk_size_mb = get_vm_disks(vm_details, rg_name)
 
             # Determine VM status
             vm_status = "offline"
@@ -282,14 +280,14 @@ def collect_azure_vms(regions):
                     tag_value_str = str(tag_value)[:50]  # Limit tag value length
                     tags.append(f"{tag_key}:{tag_value_str}")
 
-            # Create VM entity with name data and assign to region cluster
+            # Create VM entity with VirtualMachineFlat and assign to region cluster
+            # Skip platform field as requested
             vm_entity = VirtualMachine(
                 name=vm_name,
                 cluster=f"Azure-{region}",  # Assign to region cluster
                 vcpus=vcpus,
-                memory=memory,
-                disk=total_disk_size,
-                platform=os_type,
+                memory=memory_mb,  # Memory in MB
+                disk=total_disk_size_mb,  # Disk in MB
                 status=vm_status,
                 comments=f"OS: {os_name} {os_version}\nHostname: {vm_hostname}\nDisplay Name: {vm_display_name}\nResource Group: {rg_name}",
                 tags=tags
