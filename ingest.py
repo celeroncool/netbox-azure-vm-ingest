@@ -161,57 +161,15 @@ def collect_azure_regions():
     print(f"Found VMs in {len(regions)} Azure regions: {', '.join(regions)}")
     return regions
 
-def create_sites_and_clusters():
-    """Create sites and clusters for Azure regions"""
-    entities = []
-
-    # Create a cluster group for Azure VMs
-    cluster_group = ClusterGroup(
-        name="Azure",
-        description="Azure Cloud Resources"
-    )
-    entities.append(Entity(cluster_group=cluster_group))
-
-    # Create a cluster type specifically named "Azure"
-    cluster_type = ClusterType(
-        name="Azure",
-        description="Microsoft Azure Cloud Platform"
-    )
-    entities.append(Entity(cluster_type=cluster_type))
-
-    # Get all regions where VMs are located
-    regions = collect_azure_regions()
-
-    # Create sites for each region
-    for region in regions:
-        # Create a site for each Azure region
-        region_site = Site(
-            name=f"Azure-{region}",
-            status="active",
-            description=f"Azure Region: {region}"
-        )
-        entities.append(Entity(site=region_site))
-
-    # Create clusters for each region with type "Azure" and associated site
-    for region in regions:
-        cluster = Cluster(
-            name=f"Azure-{region}",
-            type="Azure",
-            group="Azure",
-            site=f"Azure-{region}",
-            description=f"Azure Region: {region}"
-        )
-        entities.append(Entity(cluster=cluster))
-
-    return entities, regions
-
-def collect_azure_vms(regions):
-    """Collect Azure VM information and format for Diode"""
+def collect_azure_vms():
+    """Collect Azure VM information and format for Diode using explicit data structures"""
     entities = []
 
     # Process VMs and assign to region clusters
     print("Processing VMs...")
     vm_count = 0
+    regions = collect_azure_regions()
+
     for resource_group in resource_client.resource_groups.list():
         rg_name = resource_group.name
 
@@ -280,15 +238,35 @@ def collect_azure_vms(regions):
                     tag_value_str = str(tag_value)[:50]  # Limit tag value length
                     tags.append(f"{tag_key}:{tag_value_str}")
 
-            # Create VM entity with VirtualMachine and assign to region cluster
-            # Skip platform field as requested
+            # Create VM entity with explicit data structure for Site and Cluster
             vm_entity = VirtualMachine(
                 name=vm_name,
-                cluster=f"Azure-{region}",  # Assign to region cluster
-                site=f"Azure-{region}",
+                # Use explicit data structure for Cluster
+                cluster=Cluster(
+                    name=f"Azure-{region}",
+                    type=ClusterType(
+                        name="Azure",
+                        description="Microsoft Azure Cloud Platform"
+                    ),
+                    group=ClusterGroup(
+                        name="Azure",
+                        description="Azure Cloud Resources"
+                    ),
+                    site=Site(
+                        name=f"Azure-{region}",
+                        status="active",
+                        description=f"Azure Region: {region}"
+                    ),
+                    description=f"Azure Region: {region}"
+                ),
+                # Use explicit data structure for Site
+                site=Site(
+                    name=f"Azure-{region}",
+                    status="active",
+                    description=f"Azure Region: {region}"
+                ),
                 vcpus=vcpus,
                 memory=memory_mb,  # Memory in MB
-                disk=total_disk_size_mb,  # Disk in MB
                 status=vm_status,
                 comments=f"OS: {os_name} {os_version}\nHostname: {vm_hostname}\nDisplay Name: {vm_display_name}\nResource Group: {rg_name}",
                 tags=tags
@@ -323,33 +301,17 @@ def main():
             print("Please set the DIODE_API_KEY environment variable with your Diode API key")
             return
 
-        # Step 1: Create sites and clusters first
-        print("Step 1: Creating sites and clusters...")
-        site_cluster_entities, regions = create_sites_and_clusters()
+        # Collect and ingest VM data with explicit data structures
+        print("Collecting VM data with explicit site and cluster structures...")
+        vm_entities = collect_azure_vms()
 
-        # Ingest sites and clusters first
-        print(f"Ingesting {len(site_cluster_entities)} sites and clusters into NetBox via Diode...")
-        response = diode_client.ingest(entities=site_cluster_entities)
-
-        if response.errors:
-            print(f"Errors during site/cluster ingestion: {response.errors}")
-            return
-        else:
-            print(f"Successfully ingested {len(site_cluster_entities)} site and cluster entities")
-
-        # Step 2: Collect and ingest VM data
-        print("\nStep 2: Collecting VM data...")
-        vm_entities = collect_azure_vms(regions)
-
-        print(f"Ingesting {len(vm_entities)} VM entities into NetBox via Diode...")
+        print(f"Ingesting {len(vm_entities)} entities into NetBox via Diode...")
         response = diode_client.ingest(entities=vm_entities)
 
         if response.errors:
-            print(f"Errors during VM ingestion: {response.errors}")
+            print(f"Errors during ingestion: {response.errors}")
         else:
-            print(f"Successfully ingested {len(vm_entities)} VM entities")
-
-        print(f"Total entities ingested: {len(site_cluster_entities) + len(vm_entities)}")
+            print(f"Successfully ingested {len(vm_entities)} entities")
 
     except Exception as e:
         import traceback
