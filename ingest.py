@@ -82,7 +82,7 @@ def get_vm_network_interfaces(vm, resource_group):
             )
 
             # Create entity with the correct field name for VM interface
-            interfaces.append(Entity(vm_interface=vm_interface))
+            interfaces.append(Entity(vminterface=vm_interface))
 
             # Get IP address if available
             if ip_config.private_ip_address:
