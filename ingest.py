@@ -33,11 +33,16 @@ compute_client = ComputeManagementClient(credential, subscription_id)
 network_client = NetworkManagementClient(credential, subscription_id)
 resource_client = ResourceManagementClient(credential, subscription_id)
 
-# Initialize Diode client
+# Diode authentication
+diode_api_key = os.environ.get("DIODE_API_KEY")
+diode_target = os.environ.get("DIODE_TARGET", "grpc://localhost:8080/diode")
+
+# Initialize Diode client with authentication
 diode_client = DiodeClient(
-    target=os.environ.get("DIODE_TARGET", "grpc://localhost:8080/diode"),
+    target=diode_target,
     app_name="azure-vm-collector",
     app_version="0.1.0",
+    api_key=diode_api_key
 )
 
 def get_vm_size_details(vm_size, location):
@@ -279,6 +284,13 @@ def main():
     try:
         print("Starting Azure VM data collection...")
 
+        # Check if Diode API key is set
+        if not diode_api_key:
+            print("ERROR: DIODE_API_KEY environment variable is not set")
+            print("Please set the DIODE_API_KEY environment variable with your Diode API key")
+            return
+
+        
         # Collect VM data
         entities = collect_azure_vms()
 
