@@ -13,6 +13,7 @@ from netboxlabs.diode.sdk.ingester import (
     Cluster,
     ClusterType,
     ClusterGroup,
+    Site,  # Added Site import
 )
 
 # Azure Enterprise App authentication
@@ -42,7 +43,7 @@ diode_client = DiodeClient(
     target=diode_target,
     app_name="azure-vm-collector",
     app_version="0.1.0",
-    api_key=diode_api_key
+    api_key=diode_api_key  # Add API key for authentication
 )
 
 def get_vm_size_details(vm_size, location):
@@ -80,8 +81,8 @@ def get_vm_network_interfaces(vm, resource_group):
                 description=f"Interface for {vm.name}"
             )
 
-            # Create entity VM interface
-            interfaces.append(Entity(vminterface=vm_interface))
+            # Create entity with the correct field name for VM interface
+            interfaces.append(Entity(vm_interface=vm_interface))
 
             # Get IP address if available
             if ip_config.private_ip_address:
@@ -150,18 +151,27 @@ def collect_azure_vms():
     entities = []
     regions = set()
 
-    # Create a cluster group and type for Azure VMs
+    # Create a cluster group for Azure VMs
     cluster_group = ClusterGroup(
         name="Azure",
         description="Azure Cloud Resources"
     )
     entities.append(Entity(cluster_group=cluster_group))
 
+    # Create a cluster type specifically named "Azure" as requested
     cluster_type = ClusterType(
-        name="Azure Region",
-        description="Azure Geographic Region"
+        name="Azure",
+        description="Microsoft Azure Cloud Platform"
     )
     entities.append(Entity(cluster_type=cluster_type))
+
+    # Create a global site for Azure resources
+    azure_site = Site(
+        name="Azure Cloud",
+        status="active",
+        description="Microsoft Azure Cloud Platform"
+    )
+    entities.append(Entity(site=azure_site))
 
     # First pass: collect all regions where VMs are located
     print("Collecting Azure regions...")
@@ -174,12 +184,23 @@ def collect_azure_vms():
 
     print(f"Found VMs in {len(regions)} Azure regions: {', '.join(regions)}")
 
-    # Create clusters for each region
+    # Create sites for each region
+    for region in regions:
+        # Create a site for each Azure region
+        region_site = Site(
+            name=f"Azure-{region}",
+            status="active",
+            description=f"Azure Region: {region}"
+        )
+        entities.append(Entity(site=region_site))
+
+    # Create clusters for each region with type "Azure" and associated site
     for region in regions:
         cluster = Cluster(
             name=f"Azure-{region}",
-            type="Azure Region",
+            type="Azure",
             group="Azure",
+            site=f"Azure-{region}",  # Associate with the region-specific site
             description=f"Azure Region: {region}"
         )
         entities.append(Entity(cluster=cluster))
@@ -290,14 +311,13 @@ def main():
             print("Please set the DIODE_API_KEY environment variable with your Diode API key")
             return
 
-        
         # Collect VM data
         entities = collect_azure_vms()
 
         print(f"Collected {len(entities)} entities from Azure")
 
         # Ingest data into Diode
-        print("Ingesting data into NetBox via Diode...")
+        print(f"Ingesting data into NetBox via Diode at {diode_target}...")
         response = diode_client.ingest(entities=entities)
 
         if response.errors:
