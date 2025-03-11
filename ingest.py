@@ -46,7 +46,9 @@ def get_vm_size_details(vm_size, location):
         size_info = compute_client.virtual_machine_sizes.list(location=location)
         for size in size_info:
             if size.name == vm_size:
-                return size.number_of_cores, size.memory_in_mb / 1024  # Return CPU count and memory in GB
+                # Convert memory to integer GB (round up)
+                memory_gb = int(size.memory_in_mb / 1024)
+                return size.number_of_cores, memory_gb
     except Exception as e:
         print(f"Error getting VM size details: {str(e)}")
     return None, None
@@ -110,6 +112,8 @@ def get_vm_disks(vm, resource_group):
 
     # OS disk
     os_disk_size = vm.storage_profile.os_disk.disk_size_gb or 0
+    # Ensure disk size is an integer
+    os_disk_size = int(os_disk_size)
     total_disk_size += os_disk_size
 
     os_disk = VirtualDisk(
@@ -123,6 +127,8 @@ def get_vm_disks(vm, resource_group):
     # Data disks
     for data_disk in vm.storage_profile.data_disks:
         disk_size = data_disk.disk_size_gb or 0
+        # Ensure disk size is an integer
+        disk_size = int(disk_size)
         total_disk_size += disk_size
 
         disk = VirtualDisk(
@@ -154,12 +160,15 @@ def collect_azure_vms():
     entities.append(Entity(cluster_type=cluster_type))
 
     # First pass: collect all regions where VMs are located
+    print("Collecting Azure regions...")
     for resource_group in resource_client.resource_groups.list():
         rg_name = resource_group.name
 
         for vm in compute_client.virtual_machines.list(rg_name):
             vm_details = compute_client.virtual_machines.get(rg_name, vm.name)
             regions.add(vm_details.location)
+
+    print(f"Found VMs in {len(regions)} Azure regions: {', '.join(regions)}")
 
     # Create clusters for each region
     for region in regions:
@@ -172,14 +181,19 @@ def collect_azure_vms():
         entities.append(Entity(cluster=cluster))
 
     # Second pass: process VMs and assign to region clusters
+    print("Processing VMs...")
+    vm_count = 0
     for resource_group in resource_client.resource_groups.list():
         rg_name = resource_group.name
 
         # Process VMs in the resource group
         for vm in compute_client.virtual_machines.list(rg_name):
+            vm_count += 1
             # Get VM details
             vm_details = compute_client.virtual_machines.get(rg_name, vm.name, expand='instanceView')
             region = vm_details.location
+
+            print(f"Processing VM: {vm.name} in {rg_name} (Region: {region})")
 
             # Determine OS details
             os_type = vm_details.storage_profile.os_disk.os_type
@@ -214,8 +228,18 @@ def collect_azure_vms():
 
             # Get VM name data
             vm_name = vm_details.name
-            vm_display_name = vm_details.tags.get("DisplayName", vm_name) if vm_details.tags else vm_name
-            vm_hostname = vm_details.os_profile.computer_name if vm_details.os_profile else vm_name
+            vm_display_name = ""
+            vm_hostname = ""
+
+            if vm_details.tags and "DisplayName" in vm_details.tags:
+                vm_display_name = vm_details.tags.get("DisplayName")
+            else:
+                vm_display_name = vm_name
+
+            if hasattr(vm_details, 'os_profile') and vm_details.os_profile:
+                vm_hostname = vm_details.os_profile.computer_name
+            else:
+                vm_hostname = vm_name
 
             # Create tags list including resource group
             tags = ["azure", os_type.lower(), vm_details.hardware_profile.vm_size, f"rg:{rg_name}"]
@@ -223,7 +247,9 @@ def collect_azure_vms():
             # Add any existing Azure tags
             if vm_details.tags:
                 for tag_key, tag_value in vm_details.tags.items():
-                    tags.append(f"{tag_key}:{tag_value}")
+                    # Convert tag value to string and limit length
+                    tag_value_str = str(tag_value)[:50]  # Limit tag value length
+                    tags.append(f"{tag_key}:{tag_value_str}")
 
             # Create VM entity with name data and assign to region cluster
             vm_entity = VirtualMachine(
@@ -247,6 +273,7 @@ def collect_azure_vms():
             entities.extend(interfaces)
             entities.extend(ip_addresses)
 
+    print(f"Processed {vm_count} VMs across {len(regions)} regions")
     return entities
 
 def main():
@@ -268,7 +295,9 @@ def main():
             print(f"Successfully ingested {len(entities)} entities into NetBox via Diode")
 
     except Exception as e:
+        import traceback
         print(f"Error collecting Azure VM data: {str(e)}")
+        print(traceback.format_exc())
     finally:
         diode_client.close()
 
