@@ -252,11 +252,6 @@ def collect_azure_vms():
                         name="Azure",
                         description="Azure Cloud Resources"
                     ),
-                    site=Site(
-                        name=f"Azure-{region}",
-                        status="active",
-                        description=f"Azure Region: {region}"
-                    ),
                     description=f"Azure Region: {region}"
                 ),
                 # Use explicit data structure for Site
