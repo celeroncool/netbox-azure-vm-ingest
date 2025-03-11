@@ -76,17 +76,16 @@ def get_vm_network_interfaces(vm, resource_group):
             )
 
             # Create entity with the correct field name for VM interface
-            # Based on the error, let's try the field name that matches the class name
-            interfaces.append(Entity(vminterface=vm_interface))
+            # According to the SDK, the field name is "vm_interface"
+            interfaces.append(Entity(vm_interface=vm_interface))
 
             # Get IP address if available
             if ip_config.private_ip_address:
+                # Create IP address without vm_interface field
                 private_ip = IPAddress(
                     address=f"{ip_config.private_ip_address}/32",
                     status="active",
-                    vm_interface=nic_name,
-                    virtual_machine=vm.name,
-                    description=f"Private IP for {vm.name}"
+                    description=f"Private IP for {vm.name} on interface {nic_name}"
                 )
                 ip_addresses.append(Entity(ip_address=private_ip))
 
@@ -100,9 +99,7 @@ def get_vm_network_interfaces(vm, resource_group):
                     public_ip_entity = IPAddress(
                         address=f"{public_ip.ip_address}/32",
                         status="active",
-                        vm_interface=nic_name,
-                        virtual_machine=vm.name,
-                        description=f"Public IP for {vm.name}"
+                        description=f"Public IP for {vm.name} on interface {nic_name}"
                     )
                     ip_addresses.append(Entity(ip_address=public_ip_entity))
 
