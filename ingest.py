@@ -165,14 +165,6 @@ def collect_azure_vms():
     )
     entities.append(Entity(cluster_type=cluster_type))
 
-    # Create a global site for Azure resources
-    azure_site = Site(
-        name="Azure Cloud",
-        status="active",
-        description="Microsoft Azure Cloud Platform"
-    )
-    entities.append(Entity(site=azure_site))
-
     # First pass: collect all regions where VMs are located
     print("Collecting Azure regions...")
     for resource_group in resource_client.resource_groups.list():
