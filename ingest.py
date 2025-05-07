@@ -1,6 +1,7 @@
 #!/usr/bin/env python
 """
-This script fetches all VM's, VM disks and VM network details from Azure using azure.mgmt.compute and azure.mgmt.network python SDK's.
+This script fetches all VM's, VM disks and VM network details from Azure using
+azure.mgmt.compute and azure.mgmt.network python SDK's.
 It then imports all that data using netboxlabs.diode.sdk to your Netbox instance.
 Azure auth: Only Enterprise App auth with Client Secret is currently supported.
 Netbox Diode auth: Only oauth supported.
@@ -43,20 +44,27 @@ def parse_args():
     parser.add_argument('--quiet', action='store_true', help='Suppress all non-error output')
     return parser.parse_args()
 
-def get_azure_vms():
-    """Authenticate to Azure and retrieve VM information"""
-    # Authenticate to Azure
-    credential = ClientSecretCredential(
+def get_azure_credentials():
+    """Create and return Azure credentials"""
+    return ClientSecretCredential(
         tenant_id=tenant_id,
         client_id=client_id,
         client_secret=client_secret
     )
 
-    # Create Compute Management Client
+def create_azure_clients(credential):
+    """Create and return Azure management clients"""
     compute_client = ComputeManagementClient(credential, subscription_id)
-
-    # Create Network Management Client
     network_client = NetworkManagementClient(credential, subscription_id)
+    return compute_client, network_client
+
+def get_azure_vms():
+    """Authenticate to Azure and retrieve VM information"""
+    # Authenticate to Azure
+    credential = get_azure_credentials()
+
+    # Create management clients
+    compute_client, network_client = create_azure_clients(credential)
 
     # Cache for subnet information to avoid repeated API calls
     subnet_cache = {}
@@ -92,6 +100,26 @@ def get_azure_vms():
             'is_os_disk': True
         }
 
+        # Try to get OS disk size
+        try:
+            os_disk_resource = compute_client.disks.get(resource_group, os_disk['name'])
+            os_disk['size_gb'] = os_disk_resource.disk_size_gb
+        except ResourceNotFoundError as e:
+            print(
+                f"Warning: OS disk '{os_disk['name']}' not found for "
+                f"{vm.name}: {e}"
+            )
+        except ServiceRequestError as e:
+            print(
+                f"Warning: Network error while fetching OS disk size for "
+                f"{vm.name}: {e}"
+            )
+        except HttpResponseError as e:
+            print(
+                f"Warning: HTTP error occurred while getting OS disk size for "
+                f"{vm.name}: {e}"
+            )
+
         # Data Disks
         data_disks = []
         for data_disk in vm.storage_profile.data_disks:
@@ -100,17 +128,6 @@ def get_azure_vms():
                 'size_gb': data_disk.disk_size_gb,
                 'is_os_disk': False
             })
-
-        # Try to get OS disk size
-        try:
-            os_disk_resource = compute_client.disks.get(resource_group, os_disk['name'])
-            os_disk['size_gb'] = os_disk_resource.disk_size_gb
-        except ResourceNotFoundError as e:
-            print(f"Warning: OS disk '{os_disk['name']}' not found for {vm.name}: {e}")
-        except ServiceRequestError as e:
-            print(f"Warning: Network error while fetching OS disk size for {vm.name}: {e}")
-        except HttpResponseError as e:
-            print(f"Warning: HTTP error occurred while getting OS disk size for {vm.name}: {e}")
 
         # Combine OS disk and data disks
         disks = [os_disk] + data_disks
@@ -139,7 +156,6 @@ def get_azure_vms():
                             'subnet_prefix': None
                         }
 
-                        # Get subnet information if available
                         if ip_config.subnet:
                             subnet_id = ip_config.subnet.id
                             ip_data['subnet'] = subnet_id.split('/')[-1]
@@ -155,7 +171,6 @@ def get_azure_vms():
                                 subnet_name = subnet_parts[10]
 
                                 try:
-                                    # Get subnet details
                                     subnet = network_client.subnets.get(
                                         subnet_resource_group,
                                         vnet_name,
@@ -169,13 +184,21 @@ def get_azure_vms():
                                     subnet_cache[subnet_id] = subnet.address_prefix
 
                                 except ResourceNotFoundError as e:
-                                    print(f"Warning: Subnet not found for {subnet_id}: {e}")
+                                    print(
+                                        f"Warning: Subnet not found for "
+                                        f"{subnet_id}: {e}"
+                                    )
                                 except ServiceRequestError as e:
-                                    print(f"Warning: Network error while fetching subnet details for {subnet_id}: {e}")
+                                    print(
+                                        f"Warning: Network error while fetching subnet details for "
+                                        f"{subnet_id}: {e}"
+                                    )
                                 except HttpResponseError as e:
-                                    print(f"Warning: HTTP error occurred while getting subnet details for {subnet_id}: {e}")
+                                    print(
+                                        f"Warning: HTTP error occurred while getting subnet "
+                                        f"details for {subnet_id}: {e}"
+                                    )
 
-                        # Get public IP if available
                         if ip_config.public_ip_address:
                             public_ip_id = ip_config.public_ip_address.id
                             public_ip_name = public_ip_id.split('/')[-1]
@@ -188,11 +211,20 @@ def get_azure_vms():
                                 )
                                 ip_data['public_ip'] = public_ip.ip_address
                             except ResourceNotFoundError as e:
-                                print(f"Warning: Public IP not found for {vm.name}, NIC {nic_name}: {e}")
+                                print(
+                                    f"Warning: Public IP not found for "
+                                    f"{vm.name}, NIC {nic_name}: {e}"
+                                )
                             except ServiceRequestError as e:
-                                print(f"Warning: Network error while fetching public IP for {vm.name}, NIC {nic_name}: {e}")
+                                print(
+                                    f"Warning: Network error while fetching public IP for "
+                                    f"{vm.name}, NIC {nic_name}: {e}"
+                                )
                             except HttpResponseError as e:
-                                print(f"Warning: HTTP error occurred while getting public IP for {vm.name}, NIC {nic_name}: {e}")
+                                print(
+                                    f"Warning: HTTP error occurred while getting public IP for "
+                                    f"{vm.name}, NIC {nic_name}: {e}"
+                                )
 
                         ip_configs.append(ip_data)
 
@@ -206,7 +238,10 @@ def get_azure_vms():
                     })
 
                 except Exception as e:
-                    print(f"Warning: Could not get network interface details for {vm.name}, NIC {nic_name}: {e}")
+                    print(
+                        f"Warning: Could not get network interface details for "
+                        f"{vm.name}, NIC {nic_name}: {e}"
+                    )
                     network_interfaces.append({
                         'name': nic_name,
                         'id': nic_id,
@@ -236,14 +271,22 @@ def get_azure_vms():
                 if size.name == vm.hardware_profile.vm_size:
                     vm_data[-1]['vcpus'] = size.number_of_cores
                     vm_data[-1]['memory_mb'] = size.memory_in_mb
-                    vm_data[-1]['disk_gb'] = size.os_disk_size_in_mb / 1024
                     break
         except ResourceNotFoundError as e:
-            print(f"Warning: VM size information not found for {vm.name}: {e}")
+            print(
+                f"Warning: VM size information not found for "
+                f"{vm.name}: {e}"
+            )
         except ServiceRequestError as e:
-            print(f"Warning: Network error while fetching VM size details for {vm.name}: {e}")
+            print(
+                f"Warning: Network error while fetching VM size details for "
+                f"{vm.name}: {e}"
+            )
         except HttpResponseError as e:
-            print(f"Warning: HTTP error occurred while getting VM size details for {vm.name}: {e}")
+            print(
+                f"Warning: HTTP error occurred while getting VM size details for "
+                f"{vm.name}: {e}"
+            )
 
     return vm_data
 
@@ -280,6 +323,85 @@ def get_ip_with_prefix(ip_address, subnet_prefix):
 
     return f"{ip_address}/32"
 
+def create_clusters(diode_client, regions):
+    """
+    Create and ingest cluster infrastructure (ClusterType, ClusterGroup, and region Clusters)
+
+    Args:
+        diode_client: DiodeClient instance
+        regions: Set of Azure regions to create clusters for
+
+    Returns:
+        dict: Mapping of region names to their corresponding Cluster objects
+    """
+    # Create and ingest ClusterType
+    cluster_type = ClusterType(
+        name="Azure",
+        description="Azure Virtual Machine Clusters"
+    )
+    cluster_type_entity = Entity(cluster_type=cluster_type)
+    print("\nIngesting ClusterType...")
+    cluster_type_response = diode_client.ingest(entities=[cluster_type_entity])
+    if cluster_type_response.errors:
+        print(f"Errors during ClusterType ingestion: {cluster_type_response.errors}")
+    else:
+        print("Successfully ingested ClusterType")
+
+    # Create and ingest ClusterGroup
+    cluster_group = ClusterGroup(
+        name="Azure",
+        description="Azure Virtual Machines"
+    )
+    cluster_group_entity = Entity(cluster_group=cluster_group)
+    print("\nIngesting ClusterGroup...")
+    cluster_group_response = diode_client.ingest(entities=[cluster_group_entity])
+    if cluster_group_response.errors:
+        print(f"Errors during ClusterGroup ingestion: {cluster_group_response.errors}")
+    else:
+        print("Successfully ingested ClusterGroup")
+
+    # Create and ingest Clusters for each region
+    region_clusters = {}
+    for region in regions:
+        cluster = Cluster(
+            name=f"Azure-{region}",
+            type=cluster_type,
+            group=cluster_group,
+            description=f"Azure VMs in {region} region",
+            tags=["Azure"]
+        )
+        region_clusters[region] = cluster
+        cluster_entity = Entity(cluster=cluster)
+        print(f"\nIngesting Cluster for region {region}...")
+        cluster_response = diode_client.ingest(entities=[cluster_entity])
+        if cluster_response.errors:
+            print(f"Errors during Cluster ingestion for region {region}: {cluster_response.errors}")
+        else:
+            print(f"Successfully ingested Cluster for region {region}")
+
+    return region_clusters
+
+def create_diode_client():
+    """
+    Create and initialize the Diode client
+
+    Returns:
+        DiodeClient: Initialized client for NetBox API communication
+    """
+    try:
+        client = DiodeClient(
+            target=diode_target,
+            app_name="azure-vm-ingest",
+            app_version="1.0.0",
+            client_id=diode_client_id,
+            client_secret=diode_client_secret
+        )
+        print("Successfully initialized Diode client")
+        return client
+    except Exception as e:
+        print(f"Error initializing Diode client: {e}")
+        raise
+
 def ingest_to_netbox(vm_data, debug=False, quiet=False):
     """Ingest VM data into NetBox using Diode SDK"""
     if debug:
@@ -295,75 +417,30 @@ def ingest_to_netbox(vm_data, debug=False, quiet=False):
             print(f" Memory (MB): {vm['memory_mb']}")
             print(" Disks:")
             for disk in vm['disks']:
-                print(f" - {disk['name']} ({'OS' if disk['is_os_disk'] else 'Data'}, Size: {disk['size_gb']} GB)")
+                print(
+                    f" - {disk['name']} ({'OS' if disk['is_os_disk'] else 'Data'}, "
+                    f"Size: {disk['size_gb']} GB)"
+                )
             print(" Network Interfaces:")
             for nic in vm['network_interfaces']:
                 print(f" - {nic['name']} (Primary: {nic['primary']})")
                 for ip_config in nic['ip_configurations']:
-                    print(f" - {ip_config['name']}: Private IP: {ip_config['private_ip']} (Subnet: {ip_config['subnet_prefix']}), Public IP: {ip_config['public_ip']}")
-
-    # Initialize Diode client
-    diode_client = DiodeClient(
-        target=diode_target,
-        app_name="azure-vm-ingest",
-        app_version="1.0.0",
-        client_id=diode_client_id,
-        client_secret=diode_client_secret
-    )
+                    print(
+                        f" - {ip_config['name']}: "
+                        f"Private IP: {ip_config['private_ip']} "
+                        f"(Subnet: {ip_config['subnet_prefix']}), "
+                        f"Public IP: {ip_config['public_ip']}"
+                    )
 
     try:
-        cluster_type = ClusterType(
-            name="Azure",
-            description="Azure Virtual Machine Clusters"
-        )
+        # Initialize Diode client
+        diode_client = create_diode_client()
 
-        cluster_type_entity = Entity(cluster_type=cluster_type)
-
-        if not quiet:
-            print("\nIngesting ClusterType...")
-        cluster_type_response = diode_client.ingest(entities=[cluster_type_entity])
-        if cluster_type_response.errors:
-            print(f"Errors during ClusterType ingestion: {cluster_type_response.errors}")
-        else:
-            print("Successfully ingested ClusterType")
-
-        cluster_group = ClusterGroup(
-            name="Azure",
-            description="Azure Virtual Machines"
-        )
-
-        cluster_group_entity = Entity(cluster_group=cluster_group)
-
-        if not quiet:
-            print("\nIngesting ClusterGroup...")
-        cluster_group_response = diode_client.ingest(entities=[cluster_group_entity])
-        if cluster_group_response.errors:
-            print(f"Errors during ClusterGroup ingestion: {cluster_group_response.errors}")
-        else:
-            print("Successfully ingested ClusterGroup")
-
+        # Extract unique regions from VM data
         regions = set(vm['location'] for vm in vm_data)
-        region_clusters = {}
 
-        for region in regions:
-            cluster = Cluster(
-                name=f"Azure-{region}",
-                type=cluster_type,
-                group=cluster_group,
-                description=f"Azure VMs in {region} region",
-                tags=["Azure"]
-            )
-
-            region_clusters[region] = cluster
-            cluster_entity = Entity(cluster=cluster)
-
-            if not quiet:
-                print(f"\nIngesting Cluster for region {region}...")
-            cluster_response = diode_client.ingest(entities=[cluster_entity])
-            if cluster_response.errors:
-                print(f"Errors during Cluster ingestion for region {region}: {cluster_response.errors}")
-            else:
-                print(f"Successfully ingested Cluster for region {region}")
+        # Create cluster infrastructure
+        region_clusters = create_clusters(diode_client, regions)
 
         # Create and ingest VMs and their disks
         for vm in vm_data:
@@ -399,7 +476,7 @@ def ingest_to_netbox(vm_data, debug=False, quiet=False):
 
             vm_entities = [Entity(virtual_machine=vm_entity)]
 
-            # Step 5: Create and ingest VirtualDisk entities for each disk
+            # Create and ingest VirtualDisk entities for each disk
             for disk in vm['disks']:
                 # Skip disks with no size information
                 if disk['size_gb'] is None:
@@ -418,7 +495,7 @@ def ingest_to_netbox(vm_data, debug=False, quiet=False):
                     print(f"  Adding disk: {disk['name']} ({disk['size_gb']} GB)")
                 vm_entities.append(Entity(virtual_disk=disk_entity))
 
-            # Step 6: Create and ingest VMInterface entities for each network interface
+            # Create and ingest VMInterface entities for each network interface
             nic_count = 0
             for nic in vm['network_interfaces']:
                 nic_count += 1
@@ -441,7 +518,7 @@ def ingest_to_netbox(vm_data, debug=False, quiet=False):
 
                 # Create and ingest IP addresses for this interface
                 for ip_config in nic['ip_configurations']:
-                    # Add private IP address with correct subnet prefix
+                    # Add private IP address with subnet prefix
                     if ip_config['private_ip']:
                         private_ip_with_prefix = get_ip_with_prefix(
                             ip_config['private_ip'],
@@ -458,6 +535,7 @@ def ingest_to_netbox(vm_data, debug=False, quiet=False):
 
                         if not quiet:
                             print(f"    Adding private IP: {private_ip_with_prefix}")
+
                         vm_entities.append(Entity(ip_address=private_ip_entity))
 
                     # Add public IP address if available (public IPs use /32)
@@ -474,6 +552,7 @@ def ingest_to_netbox(vm_data, debug=False, quiet=False):
 
                         if not quiet:
                             print(f"    Adding public IP: {public_ip_with_prefix}")
+
                         vm_entities.append(Entity(ip_address=public_ip_entity))
 
             # Ingest VM and all its components in a single request
@@ -483,9 +562,9 @@ def ingest_to_netbox(vm_data, debug=False, quiet=False):
             else:
                 print(f"Successfully ingested VM {vm['name']} with {len(vm_entities)-1} components")
 
-
     except Exception as e:
         print(f"\nError during ingestion: {e}")
+
 if __name__ == "__main__":
     # Parse command-line arguments
     args = parse_args()
