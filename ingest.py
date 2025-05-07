@@ -1,4 +1,5 @@
 import os
+import argparse
 from azure.identity import ClientSecretCredential
 from azure.mgmt.compute import ComputeManagementClient
 from azure.mgmt.network import NetworkManagementClient
@@ -30,6 +31,12 @@ subscription_id = os.environ.get("AZURE_SUBSCRIPTION_ID")
 diode_target = os.environ.get("DIODE_TARGET", "grpc://localhost:8080/diode")
 diode_client_id = os.environ.get("DIODE_CLIENT_ID")
 diode_client_secret = os.environ.get("DIODE_CLIENT_SECRET")
+
+def parse_args():
+    parser = argparse.ArgumentParser(description='Ingest Azure VM data into NetBox')
+    parser.add_argument('--debug', action='store_true', help='Enable debug output')
+    parser.add_argument('--quiet', action='store_true', help='Suppress all non-error output')
+    return parser.parse_args()
 
 def get_azure_vms():
     """Authenticate to Azure and retrieve VM information"""
@@ -250,27 +257,28 @@ def get_ip_with_prefix(ip_address, subnet_prefix):
     else:  # IPv4
         return f"{ip_address}/32"
 
-def ingest_to_netbox(vm_data):
+def ingest_to_netbox(vm_data, debug=False, quiet=False):
     """Ingest VM data into NetBox using Diode SDK"""
     # Print debug information about VM data
-    print("\n=== DEBUG: VM Data ===")
-    for i, vm in enumerate(vm_data):
-        print(f"\nVM {i+1}: {vm['name']}")
-        print(f"  Location: {vm['location']}")
-        print(f"  Resource Group: {vm['resource_group']}")
-        print(f"  VM Size: {vm['vm_size']}")
-        print(f"  OS Type: {vm['os_type']}")
-        print(f"  Status: {vm['status']}")
-        print(f"  vCPUs: {vm['vcpus']}")
-        print(f"  Memory (MB): {vm['memory_mb']}")
-        print("  Disks:")
-        for disk in vm['disks']:
-            print(f"    - {disk['name']} ({'OS' if disk['is_os_disk'] else 'Data'}, Size: {disk['size_gb']} GB)")
-        print("  Network Interfaces:")
-        for nic in vm['network_interfaces']:
-            print(f"    - {nic['name']} (Primary: {nic['primary']})")
-            for ip_config in nic['ip_configurations']:
-                print(f"      - {ip_config['name']}: Private IP: {ip_config['private_ip']} (Subnet: {ip_config['subnet_prefix']}), Public IP: {ip_config['public_ip']}")
+    if debug:
+        print("\n=== DEBUG: VM Data ===")
+        for i, vm in enumerate(vm_data):
+            print(f"\nVM {i+1}: {vm['name']}")
+            print(f" Location: {vm['location']}")
+            print(f" Resource Group: {vm['resource_group']}")
+            print(f" VM Size: {vm['vm_size']}")
+            print(f" OS Type: {vm['os_type']}")
+            print(f" Status: {vm['status']}")
+            print(f" vCPUs: {vm['vcpus']}")
+            print(f" Memory (MB): {vm['memory_mb']}")
+            print(" Disks:")
+            for disk in vm['disks']:
+                print(f" - {disk['name']} ({'OS' if disk['is_os_disk'] else 'Data'}, Size: {disk['size_gb']} GB)")
+            print(" Network Interfaces:")
+            for nic in vm['network_interfaces']:
+                print(f" - {nic['name']} (Primary: {nic['primary']})")
+                for ip_config in nic['ip_configurations']:
+                    print(f" - {ip_config['name']}: Private IP: {ip_config['private_ip']} (Subnet: {ip_config['subnet_prefix']}), Public IP: {ip_config['public_ip']}")
 
     # Initialize Diode client
     diode_client = DiodeClient(
@@ -290,7 +298,8 @@ def ingest_to_netbox(vm_data):
 
         cluster_type_entity = Entity(cluster_type=cluster_type)
 
-        print("\nIngesting ClusterType...")
+        if not quiet:
+            print("\nIngesting ClusterType...")
         cluster_type_response = diode_client.ingest(entities=[cluster_type_entity])
         if cluster_type_response.errors:
             print(f"Errors during ClusterType ingestion: {cluster_type_response.errors}")
@@ -305,7 +314,8 @@ def ingest_to_netbox(vm_data):
 
         cluster_group_entity = Entity(cluster_group=cluster_group)
 
-        print("\nIngesting ClusterGroup...")
+        if not quiet:
+            print("\nIngesting ClusterGroup...")
         cluster_group_response = diode_client.ingest(entities=[cluster_group_entity])
         if cluster_group_response.errors:
             print(f"Errors during ClusterGroup ingestion: {cluster_group_response.errors}")
@@ -328,7 +338,8 @@ def ingest_to_netbox(vm_data):
             region_clusters[region] = cluster
             cluster_entity = Entity(cluster=cluster)
 
-            print(f"\nIngesting Cluster for region {region}...")
+            if not quiet:
+                print(f"\nIngesting Cluster for region {region}...")
             cluster_response = diode_client.ingest(entities=[cluster_entity])
             if cluster_response.errors:
                 print(f"Errors during Cluster ingestion for region {region}: {cluster_response.errors}")
@@ -362,10 +373,10 @@ def ingest_to_netbox(vm_data):
                 ]
             )
 
-            print(f"\nIngesting VM {vm['name']}...")
-            print(f"  Using cluster: {vm_cluster.name}")
-            print(f"  Cluster type: {vm_cluster.type.name}")
-            print(f"  Cluster group: {vm_cluster.group.name}")
+            if debug:
+                print(f" Using cluster: {vm_cluster.name}")
+                print(f" Cluster type: {vm_cluster.type.name}")
+                print(f" Cluster group: {vm_cluster.group.name}")
 
             # Create a list to hold all entities for this VM (VM + disks)
             vm_entities = [Entity(virtual_machine=vm_entity)]
@@ -374,7 +385,8 @@ def ingest_to_netbox(vm_data):
             for disk in vm['disks']:
                 # Skip disks with no size information
                 if disk['size_gb'] is None:
-                    print(f"  Skipping disk {disk['name']} - no size information available")
+                    if not quiet:
+                        print(f"  Skipping disk {disk['name']} - no size information available")
                     continue
 
                 # Create VirtualDisk entity
@@ -385,7 +397,8 @@ def ingest_to_netbox(vm_data):
                     tags=["Azure"]
                 )
 
-                print(f"  Adding disk: {disk['name']} ({disk['size_gb']} GB)")
+                if not quiet:
+                    print(f"  Adding disk: {disk['name']} ({disk['size_gb']} GB)")
                 vm_entities.append(Entity(virtual_disk=disk_entity))
 
             # Step 6: Create and ingest VMInterface entities for each network interface
@@ -408,7 +421,8 @@ def ingest_to_netbox(vm_data):
                     tags=["Azure"]
                 )
 
-                print(f"  Adding interface: {interface_name}")
+                if not quiet:
+                    print(f"  Adding interface: {interface_name}")
                 vm_entities.append(Entity(vm_interface=interface_entity))
 
                 # Step 7: Create and ingest IP addresses for this interface
@@ -428,7 +442,8 @@ def ingest_to_netbox(vm_data):
                             tags=["Azure", "Private"]
                         )
 
-                        print(f"    Adding private IP: {private_ip_with_prefix}")
+                        if not quiet:
+                            print(f"    Adding private IP: {private_ip_with_prefix}")
                         vm_entities.append(Entity(ip_address=private_ip_entity))
 
                     # Add public IP address if available (public IPs use /32)
@@ -443,7 +458,8 @@ def ingest_to_netbox(vm_data):
                             tags=["Azure", "Public"]
                         )
 
-                        print(f"    Adding public IP: {public_ip_with_prefix}")
+                        if not quiet:
+                            print(f"    Adding public IP: {public_ip_with_prefix}")
                         vm_entities.append(Entity(ip_address=public_ip_entity))
 
             # Ingest VM and all its components in a single request
@@ -457,12 +473,18 @@ def ingest_to_netbox(vm_data):
     except Exception as e:
         print(f"\nError during ingestion: {e}")
 if __name__ == "__main__":
+    # Parse command-line arguments
+    args = parse_args()
+
     # Get Azure VM data
-    print("Retrieving Azure VM data...")
+    if not args.quiet:
+        print("Retrieving Azure VM data...")
     vm_data = get_azure_vms()
 
     # Ingest data into NetBox
-    print(f"Ingesting {len(vm_data)} VMs into NetBox...")
-    ingest_to_netbox(vm_data)
+    if not args.quiet:
+        print(f"Ingesting {len(vm_data)} VMs into NetBox...")
+    ingest_to_netbox(vm_data, debug=args.debug, quiet=args.quiet)
 
-    print("Ingestion complete!")
+    if not args.quiet:
+        print("Ingestion complete!")
